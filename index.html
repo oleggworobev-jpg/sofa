@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0b0610" />
+<title>Heart Terminal // Соня</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #050505;
+    --term-green: #00ff41;
+    --term-pink: #ff4d6d;
+    --term-dark: #111;
+    --text: #a0a0a0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    overflow: hidden; user-select: none;
+  }
+
+  /* Холст для молний на фоне */
+  #bg-canvas {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: 0; pointer-events: none;
+  }
+
+  /* Эффект CRT-монитора */
+  body::before {
+    content: " "; display: block; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    z-index: 10; background-size: 100% 2px, 3px 100%; pointer-events: none;
+    animation: flicker 0.15s infinite;
+  }
+  @keyframes flicker { 0% { opacity: 0.95; } 50% { opacity: 1; } 100% { opacity: 0.95; } }
+
+  /* Терминал */
+  .terminal-box {
+    border: 1px solid #333;
+    /* Сделал фон чуть прозрачным, чтобы молнии были видны за ним */
+    background: rgba(8, 8, 8, 0.85);
+    backdrop-filter: blur(4px);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 0 40px rgba(0, 255, 65, 0.05), inset 0 0 30px rgba(0,0,0,1);
+    width: 92vw;
+    max-width: 650px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 2;
+  }
+
+  .terminal-header {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #555;
+    border-bottom: 1px solid #222;
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .stage {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 320px;
+    perspective: 1000px;
+  }
+
+  .heart-wrap {
+    display: flex;
+    justify-content: center;
+    transition: transform 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+    transform-style: preserve-3d;
+  }
+
+  .half {
+    margin: 0;
+    white-space: pre;
+    font-size: 15px;
+    line-height: 0.9;
+    color: var(--term-pink);
+    text-shadow: 0 0 10px rgba(255, 77, 109, 0.7), 0 0 25px rgba(255, 77, 109, 0.3);
+    will-change: transform;
+    transition: transform 0.8s ease;
+  }
+
+  /* Состояние: РАЗБИТО (Глитч) */
+  .half.left { 
+    transform: translateX(-15px) rotateY(10deg); 
+    animation: glitchL 4s infinite alternate ease-in-out;
+  }
+  .half.right { 
+    transform: translateX(15px) rotateY(-10deg); 
+    animation: glitchR 4s infinite alternate ease-in-out;
+  }
+
+  @keyframes glitchL {
+    0% { transform: translateX(-15px) rotateY(10deg) translateY(0); text-shadow: 0 0 10px var(--term-pink); }
+    45% { transform: translateX(-15px) rotateY(10deg) translateY(0); }
+    48% { transform: translateX(-18px) rotateY(10deg) translateY(-3px); text-shadow: 2px 0 red, -2px 0 blue; }
+    50% { transform: translateX(-15px) rotateY(10deg) translateY(0); }
+    100% { transform: translateX(-15px) rotateY(10deg) translateY(0); }
+  }
+  @keyframes glitchR {
+    0% { transform: translateX(15px) rotateY(-10deg) translateY(0); text-shadow: 0 0 10px var(--term-pink); }
+    45% { transform: translateX(15px) rotateY(-10deg) translateY(0); }
+    48% { transform: translateX(18px) rotateY(-10deg) translateY(-3px); text-shadow: 2px 0 red, -2px 0 blue; }
+    50% { transform: translateX(15px) rotateY(-10deg) translateY(0); }
+    100% { transform: translateX(15px) rotateY(-10deg) translateY(0); }
+  }
+
+  /* Состояние: СОБРАНО (Цвет не меняем) */
+  body.joined .half.left, body.joined .half.right { 
+    animation: none; 
+    transform: translateX(0) rotateY(0); 
+  }
+  body.joined .heart-wrap { animation: beat 1.2s infinite; }
+  
+  @keyframes beat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.06); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.04); }
+  }
+
+  /* HUD */
+  .hud {
+    margin-top: 20px;
+    width: 100%;
+    border-top: 1px solid #222;
+    padding-top: 20px;
+    text-align: center;
+    z-index: 2;
+  }
+
+  .hud-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 15px;
+    letter-spacing: 1px;
+  }
+
+  .big-num {
+    font-size: 56px;
+    font-weight: bold;
+    color: var(--term-green);
+    text-shadow: 0 0 15px rgba(0, 255, 65, 0.6);
+    margin: 10px 0;
+    letter-spacing: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .label {
+    font-size: 15px;
+    color: var(--term-green);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    transition: color 0.8s ease;
+  }
+
+  .sub-timer {
+    font-size: 16px;
+    color: var(--term-green);
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 15px;
+    background: var(--term-green);
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: 5px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  @media (max-width: 450px) {
+    .half { font-size: 11px; }
+    .big-num { font-size: 44px; }
+    .label { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Фон с молниями -->
+<canvas id="bg-canvas"></canvas>
+
+<div class="terminal-box">
+  <div class="terminal-header">
+    <span>root@sonya:~</span>
+    <span>heart_daemon.v3.1</span>
+  </div>
+
+  <div class="stage">
+    <div class="heart-wrap">
+      <pre class="half left" id="heart-left"></pre>
+      <pre class="half right" id="heart-right"></pre>
+    </div>
+  </div>
+
+  <div class="hud">
+    <div class="hud-line">
+      <span>SYS_STATUS: <span id="status">BOOTING...</span></span>
+      <span>TARGET: 11.11</span>
+    </div>
+    
+    <div id="counter-container">
+      <div class="big-num" id="days-left">--</div>
+      <div class="label" id="label-text">расчет...</div>
+      <div class="sub-timer" id="sub-timer">--:--:--</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= НАСТРОЙКИ ================= */
+const CONFIG = {
+  month: 11,       // ← номер месяца годовщины (1–12)
+  day: 11,         // ← день годовщины
+  startYear: 2024, // ← год, когда вы начали встречаться
+};
+/* ============================================= */
+
+/* 1. МАТЕМАТИЧЕСКИЙ РЕНДЕРЕР СЕРДЦА */
+function generateHeart() {
+  let leftHalf = [];
+  let rightHalf = [];
+  const stepX = 0.045; 
+  const stepY = 0.09;
+
+  for (let y = 1.5; y > -1.5; y -= stepY) {
+    let rowL = '';
+    let rowR = '';
+    
+    for (let x = -1.5; x < 1.5; x += stepX) {
+      let eq = Math.pow(x*x + y*y - 1, 3) - x*x * Math.pow(y, 3);
+      let char = ' ';
+      if (eq <= 0) {
+        if (eq > -0.02) char = '@';
+        else if (eq > -0.1) char = '#';
+        else if (eq > -0.3) char = '*';
+        else char = '+';
+      }
+
+      if (x < 0) rowL += char;
+      else rowR += char;
+    }
+    
+    if (rowL.trim() !== '' || rowR.trim() !== '') {
+      leftHalf.push(rowL);
+      rightHalf.push(rowR);
+    }
+  }
+  document.getElementById('heart-left').textContent = leftHalf.join('\n');
+  document.getElementById('heart-right').textContent = rightHalf.join('\n');
+}
+generateHeart();
+
+/* 2. МОЛНИИ НА ФОНЕ (Canvas) */
+const canvas = document.getElementById('bg-canvas');
+const ctx = canvas.getContext('2d');
+let w, h;
+let bolts = [];
+
+function resize() { 
+  w = canvas.width = window.innerWidth; 
+  h = canvas.height = window.innerHeight; 
+}
+window.addEventListener('resize', resize);
+resize();
+
+function createBolt() {
+  let startX = Math.random() * w;
+  let currentX = startX;
+  let currentY = 0;
+  let points = [{x: currentX, y: currentY}];
+  
+  // Основной ствол молнии
+  while (currentY < h) {
+    currentX += (Math.random() - 0.5) * 50; // Рваный шаг в стороны
+    currentY += Math.random() * 40 + 20;    // Шаг вниз
+    points.push({x: currentX, y: currentY});
+  }
+  
+  bolts.push({ points, life: 1.0, fade: 0.04 + Math.random() * 0.04 });
+  
+  // Случайная ветка
+  if (Math.random() > 0.4) {
+    let mid = points[Math.floor(points.length/2)];
+    let bPoints = [{x: mid.x, y: mid.y}];
+    let bx = mid.x, by = mid.y;
+    for (let i = 0; i < 6; i++) {
+      bx += (Math.random() - 0.5) * 50 + (Math.random() > 0.5 ? 20 : -20);
+      by += Math.random() * 30 + 10;
+      bPoints.push({x: bx, y: by});
+    }
+    bolts.push({ points: bPoints, life: 1.0, fade: 0.05 + Math.random() * 0.05 });
+  }
+}
+
+function drawLightning() {
+  ctx.clearRect(0, 0, w, h);
+  
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    let b = bolts[i];
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(255, 77, 109, ${b.life})`; // Розовый неон
+    ctx.lineWidth = Math.random() > 0.5 ? 1.5 : 2.5; // Рандомная толщина
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = `rgba(255, 77, 109, ${b.life})`;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.moveTo(b.points[0].x, b.points[0].y);
+    for (let j = 1; j < b.points.length; j++) {
+      ctx.lineTo(b.points[j].x, b.points[j].y);
+    }
+    ctx.stroke();
+    
+    b.life -= b.fade;
+    if (b.life <= 0) bolts.splice(i, 1);
+  }
+  
+  ctx.shadowBlur = 0;
+  
+  // Случайный запуск молнии (примерно раз в 2-4 секунды)
+  if (Math.random() < 0.015 && bolts.length < 3) {
+    createBolt();
+  }
+  
+  requestAnimationFrame(drawLightning);
+}
+
+// Первый удар при загрузке
+setTimeout(() => createBolt(), 500);
+drawLightning();
+
+
+/* 3. УТИЛИТЫ ВРЕМЕНИ И ЛОГИКА */
+const pad = n => String(n).padStart(2, '0');
+function plural(n, [one, few, many]) {
+  const n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return few;
+  return many;
+}
+function fmtHMS(ms) {
+  if (ms < 0) ms = 0;
+  const t = Math.floor(ms / 1000);
+  return `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+}
+
+const M = CONFIG.month - 1;
+const D = CONFIG.day;
+
+function getState(now) {
+  const y = now.getFullYear();
+  const start = new Date(y, M, D, 0, 0, 0, 0);
+  const end   = new Date(y, M, D + 1, 0, 0, 0, 0);
+
+  if (now >= start && now < end) {
+    return { joined: true, years: y - CONFIG.startYear, since: start };
+  }
+  const target = now < start ? start : new Date(y + 1, M, D, 0, 0, 0, 0);
+  const ms = target - now;
+  return { joined: false, target, days: Math.max(1, Math.ceil(ms / 86400000)) };
+}
+
+let lastJoined = null;
+const daysEl = document.getElementById('days-left');
+const labelEl = document.getElementById('label-text');
+const timerEl = document.getElementById('sub-timer');
+const statusEl = document.getElementById('status');
+
+function typeWriter(element, text, speed = 50) {
+  element.textContent = '';
+  let i = 0;
+  function type() {
+    if (i < text.length) {
+      element.textContent += text.charAt(i);
+      i++;
+      setTimeout(type, speed);
+    }
+  }
+  type();
+}
+
+function tick() {
+  const now = new Date();
+  const st = getState(now);
+
+  if (st.joined !== lastJoined) {
+    if (lastJoined !== null && st.joined) {
+      const hf = window.Telegram?.WebApp?.HapticFeedback;
+      hf?.notificationOccurred?.('success');
+      hf?.impactOccurred?.('heavy');
+    }
+    lastJoined = st.joined;
+    document.body.classList.toggle('joined', st.joined);
+    
+    if (st.joined) {
+      typeWriter(statusEl, 'SYNC_COMPLETE');
+      statusEl.style.color = 'var(--term-pink)';
+      statusEl.style.textShadow = '0 0 10px var(--term-pink)';
+    } else {
+      typeWriter(statusEl, 'WAITING_FOR_SYNC');
+      statusEl.style.color = 'var(--text)';
+      statusEl.style.textShadow = 'none';
+    }
+  }
+
+  if (st.joined) {
+    const yrs = st.years;
+    daysEl.textContent = yrs;
+    // В день события тоже используем розовый, чтобы не было контраста с сердцем
+    daysEl.style.color = 'var(--term-pink)'; 
+    daysEl.style.textShadow = '0 0 15px rgba(255,77,109,0.6)';
+    
+    labelEl.textContent = `${plural(yrs, ['год','года','лет'])} вместе 💞`;
+    labelEl.style.color = 'var(--term-pink)';
+    
+    timerEl.textContent = `> uptime: ${fmtHMS(now - st.since)}`;
+  } else {
+    daysEl.textContent = st.days;
+    daysEl.style.color = 'var(--term-green)';
+    daysEl.style.textShadow = '0 0 15px rgba(0,255,65,0.6)';
+    
+    labelEl.textContent = `${plural(st.days, ['день','дня','дней'])} до синхронизации`;
+    labelEl.style.color = 'var(--term-green)';
+    
+    timerEl.innerHTML = `> countdown: ${fmtHMS(st.target - now)} <span class="cursor"></span>`;
+  }
+}
+
+function boot() {
+  const tg = window.Telegram?.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    try {
+      tg.setHeaderColor?.('#050505');
+      tg.setBackgroundColor?.('#050505');
+    } catch (e) {}
+  }
+  setTimeout(() => {
+    tick();
+    setInterval(tick, 1000);
+  }, 500);
+}
+
+boot();
+</script>
+</body>
+</html>
